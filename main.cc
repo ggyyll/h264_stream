@@ -191,7 +191,6 @@ void process_nal_payload(const Bytes& buff)
     show_bytes(sodb, s + "sodb");
     if (h.nal_unit_type == 7)
     {
-        H264Parse parse;
         int64_t width = 0;
         int64_t height = 0;
         h264_width_height(ebsp.data(), ebsp.size(), &width, &height);
