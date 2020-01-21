@@ -1,2 +1,2 @@
 app:
-	g++ main.cc -g -std=c++14
+	g++ main.cc h265_sps.cc -g -std=c++14

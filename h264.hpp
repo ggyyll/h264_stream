@@ -1,8 +1,9 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#ifndef __H264_HPP__
+#define __H264_HPP__
+
 #include <assert.h>
 #include <stdint.h>
+#include "noncopyable.hpp"
 
 class H264Parse
 {
@@ -58,11 +59,14 @@ private:
     }
 
 public:
-    void h264_width_height(uint8_t *begin, uint64_t len, int64_t *width, int64_t *height)
+    H264Parse(const uint8_t *start, uint64_t len)
+        : start_(start)
+        , length_(len)
+        , current_bit_(0) {};
+
+public:
+    void h264_width_height(int64_t *width, int64_t *height)
     {
-        start_ = begin;
-        length_ = len;
-        current_bit_ = 0;
 
         int frame_crop_left_offset = 0;
         int frame_crop_right_offset = 0;
@@ -183,22 +187,24 @@ public:
         }
         int vui_parameters_present_flag = read_bit();
         UNUSE(vui_parameters_present_flag);
-        begin++;
 
         *width = ((pic_width_in_mbs_minus1 + 1) * 16) - frame_crop_bottom_offset * 2
                  - frame_crop_top_offset * 2;
         *height = ((2 - frame_mbs_only_flag) * (pic_height_in_map_units_minus1 + 1) * 16)
                   - (frame_crop_right_offset * 2) - (frame_crop_left_offset * 2);
     }
+    NONCOPYABLE(H264Parse);
 
 private:
-    uint8_t *start_;
+    const uint8_t *start_;
     uint64_t length_;
     uint64_t current_bit_;
 };
 
-void h264_width_height(uint8_t *begin, uint64_t len, int64_t *width, int64_t *height)
+void h264_width_height(const uint8_t *begin, uint64_t len, int64_t *width, int64_t *height)
 {
-    H264Parse parse;
-    parse.h264_width_height(begin,len,width,height);
+    H264Parse parse(begin, len);
+    parse.h264_width_height(width, height);
 }
+
+#endif  // __H264_HPP__

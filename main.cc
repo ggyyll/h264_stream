@@ -8,6 +8,8 @@
 #include <vector>
 #include "scoped_exit.hpp"
 #include "h264.hpp"
+#include "read_bits.hpp"
+#include "h265_sps.hpp"
 
 using CircularBytes = boost::circular_buffer<uint8_t>;
 using Bytes = std::vector<uint8_t>;
@@ -63,13 +65,26 @@ struct NaluHeader
     int nal_unit_type;
 };
 
-void parse_nalu_header(NaluHeader* h, uint8_t ch)
+void parse_264_nalu_header(NaluHeader* h, uint8_t ch)
 {
     h->forbidden_bit = ch & 0x80;
     h->nal_reference_bit = ch & 0x60;
     h->nal_reference_bit >>= 5;
     h->nal_unit_type = ch & 0x1f;
 }
+
+void parse_265_nalu_header(NaluHeader* h, const Bytes& buff)
+{
+    (void)h;
+    ReadBit r(buff.data(), buff.size());
+    h->forbidden_bit = r.read_bit();
+    uint32_t type = r.read_n_bits(6);
+    h->nal_unit_type = type;
+    uint32_t layer_id = r.read_n_bits(6);
+    uint32_t temporal_id_plus1 = r.read_n_bits(3);
+    printf("type %u layer_id  %u temporal_id_plus1 %u\n", type, layer_id, temporal_id_plus1);
+}
+
 void log_nalu_header(const NaluHeader& h)
 {
     printf("forbidden %d reference %d type %d\n",
@@ -161,7 +176,7 @@ void process_nal_payload(const Bytes& buff)
         return;
     }
     NaluHeader h;
-    parse_nalu_header(&h, buff[0]);
+    parse_264_nalu_header(&h, buff[0]);
     log_nalu_header(h);
     if (h.nal_unit_type != 7 && h.nal_unit_type != 8)
     {
@@ -222,6 +237,71 @@ void find_nal_payload(FILE* fp, Bytes* buffer)
         }
     }
 }
+
+void process_h265_nal_payload(const Bytes& buff)
+{
+    if (buff.size() < 2)
+    {
+        return;
+    }
+    Bytes ebsp = buff;
+    h265_nal_t nal;
+    memset(&nal, 0, sizeof nal);
+
+    bs_t* b = bs_new(ebsp.data(), ebsp.size());
+    // nal header
+    nal.forbidden_zero_bit = bs_read_f(b, 1);
+    nal.nal_unit_type = bs_read_u(b, 6);
+    nal.nuh_layer_id = bs_read_u(b, 6);
+    nal.nuh_temporal_id_plus1 = bs_read_u(b, 3);
+    nal.parsed = NULL;
+    nal.sizeof_parsed = 0;
+    bs_free(b);
+
+    int nal_size = ebsp.size();
+    int rbsp_size = ebsp.size();
+    uint8_t* rbsp_buf = (uint8_t*)malloc(rbsp_size);
+
+    int rc = nal_to_rbsp(2, buff.data(), &nal_size, rbsp_buf, &rbsp_size);
+
+    if (rc < 0)
+    {
+        free(rbsp_buf);
+        return;
+    }  // handle conversion error
+    if (nal.nal_unit_type != 33)
+    {
+        return;
+    }
+    b = bs_new(rbsp_buf, rbsp_size);
+    h265_sps_t sps;
+    h265_read_sps_rbsp(&sps, b);
+    printf("%ldx%ld\n", sps.width, sps.height);
+
+}
+void parse_h265_file(const std::string& filename)
+{
+    FILE* fp = fopen(filename.data(), "rb");
+    if (!fp)
+    {
+        return;
+    }
+    auto file_close = make_scoped_exit([&fp]() { fclose(fp); });
+
+    if (find_first_start_code(fp) == false)
+    {
+        printf("invalid h264 stream : not found first start code\n");
+        return;
+    }
+    Bytes buffer;
+    while (feof(fp) == false)
+    {
+        find_nal_payload(fp, &buffer);
+        process_h265_nal_payload(buffer);
+        buffer.clear();
+    }
+    printf("file eof\n");
+}
 void parse_h264_file(const std::string& filename)
 {
     FILE* fp = fopen(filename.data(), "rb");
@@ -253,6 +333,7 @@ int main(int argc, char** argv)
         printf("%s input filename\n", argv[0]);
         exit(0);
     }
-    parse_h264_file(argv[1]);
+    // parse_h264_file(argv[1]);
+    parse_h265_file(argv[1]);
     return 0;
 }
